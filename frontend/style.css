@@ -1,0 +1,4 @@
+body { font-family: Arial; padding: 30px; }
+button { padding: 6px 12px; margin: 5px; cursor: pointer; }
+input { padding: 5px; margin: 5px; width: 250px; }
+h1, h2 { color: #2c3e50; }
