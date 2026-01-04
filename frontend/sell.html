@@ -1,15 +1,50 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Sell Stocks</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>💸 Sell Stocks</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h2>💸 Sell Stocks</h2>
-  <div id="portfolio"></div>
-  <br>
-  <button onclick="navigate('home')">⬅ Back to Home</button>
 
-  <script src="script.js"></script>
+<h2>💸 Sell Stocks</h2>
+
+<h3>🏆 Top 2 Stocks to Sell</h3>
+<div id="top-picks" class="cards-container"></div>
+
+<h3>Other Stocks</h3>
+<div id="portfolio" class="cards-container"></div>
+
+<br>
+<button onclick="navigate('home')">⬅ Back to Home</button>
+
+<script src="script.js"></script>
+<script>
+  function renderSellPage(data) {
+    data.stocks.sort((a,b) => (b.current_value - b.invested) - (a.current_value - a.invested));
+    
+    document.getElementById("top-picks").innerHTML =
+      data.stocks.slice(0,2).map(s => `
+      <div class="card">
+        <p><b>${s.symbol}</b></p>
+        <p>Qty: ${s.quantity}</p>
+        <p>Current Price: ₹${s.current_price}</p>
+        <input id="sell-${s.symbol}" type="number" min="1" max="${s.quantity}" value="1">
+        <button onclick="sellStock('${s.symbol}', document.getElementById('sell-${s.symbol}').value)">Sell</button>
+      </div>`).join("");
+
+    document.getElementById("portfolio").innerHTML =
+      data.stocks.slice(2).map(s => `
+      <div class="card">
+        <p><b>${s.symbol}</b></p>
+        <p>Qty: ${s.quantity}</p>
+        <p>Current Price: ₹${s.current_price}</p>
+        <input id="sell-${s.symbol}" type="number" min="1" max="${s.quantity}" value="1">
+        <button onclick="sellStock('${s.symbol}', document.getElementById('sell-${s.symbol}').value)">Sell</button>
+      </div>`).join("");
+  }
+</script>
+
 </body>
 </html>

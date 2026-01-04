@@ -1,15 +1,60 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>My Portfolio</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📊 My Portfolio</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <h2>📊 My Portfolio</h2>
-  <div id="portfolio"></div>
-  <br>
-  <button onclick="navigate('home')">⬅ Back to Home</button>
 
-  <script src="script.js"></script>
+<h2>📊 My Portfolio</h2>
+
+<div id="portfolio" class="cards-container"></div>
+
+<h3>Summary</h3>
+<p>Total Invested: ₹<span id="total-invested">0</span></p>
+<p>Current Value: ₹<span id="current-value">0</span></p>
+<p>Profit / Loss: <span id="profit-loss">0</span> (<span id="direction">↑</span>)</p>
+
+<canvas id="portfolioChart" style="max-width:400px;margin-top:20px;"></canvas>
+
+<br>
+<button onclick="navigate('home')">⬅ Back to Home</button>
+
+<script src="script.js"></script>
+<script>
+  // Update profit-loss and direction after rendering portfolio
+  function renderPortfolio(data) {
+    let totalInvested = 0, totalCurrent = 0;
+
+    data.stocks.forEach(s => {
+      totalInvested += s.invested;
+      totalCurrent += s.current_value;
+    });
+
+    const profit = totalCurrent - totalInvested;
+
+    document.getElementById("total-invested").innerText = totalInvested.toFixed(2);
+    document.getElementById("current-value").innerText = totalCurrent.toFixed(2);
+    document.getElementById("profit-loss").innerText = profit.toFixed(2);
+    document.getElementById("direction").innerText = profit >=0 ? "↑" : "↓";
+
+    document.getElementById("portfolio").innerHTML =
+      data.stocks.map(p => `
+        <div class="card">
+          <p><b>${p.symbol}</b></p>
+          <p>Qty: ${p.quantity}</p>
+          <p>Invested: ₹${p.invested.toFixed(2)}</p>
+          <p>Current: ₹${p.current_value.toFixed(2)}</p>
+          <p>Profit: ₹${(p.current_value - p.invested).toFixed(2)}</p>
+        </div>
+      `).join("");
+
+    drawPortfolioChart(data.stocks);
+  }
+</script>
+
 </body>
 </html>

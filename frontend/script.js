@@ -1,105 +1,186 @@
 // ---------------- LOGIN ----------------
 function login() {
-  const user = document.getElementById("username").value;
-  if (!user) return alert("Enter username");
+  const user = document.getElementById("username").value.trim();
+  const pass = document.getElementById("password").value.trim();
+  if (!user || !pass) {
+    alert("Enter username and password");
+    return;
+  }
   localStorage.setItem("user_id", user);
   window.location.href = "home.html";
 }
 
 // ---------------- NAVIGATION ----------------
 function navigate(page) {
-  const user = localStorage.getItem("user_id");
-  if (!user && page !== 'index') return alert("Please login first");
-  
-  switch(page) {
-    case 'home': window.location.href = "home.html"; break;
-    case 'buy': window.location.href = "buy.html"; break;
-    case 'sell': window.location.href = "sell.html"; break;
-    case 'profile': window.location.href = "profile.html"; break;
-  }
+  window.location.href = page + ".html";
 }
 
 // ---------------- BUY SUGGESTIONS ----------------
 function getBuySuggestions() {
-  const amount = document.getElementById("amount").value;
+  const amount = parseFloat(document.getElementById("amount").value);
   if (!amount) return alert("Enter amount");
 
   fetch("http://127.0.0.1:5000/buy-suggestions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amount: amount })
+    body: JSON.stringify({ amount })
   })
-  .then(res => res.json())
-  .then(data => {
-    let html = "";
-    if (data.error) {
-      html = `<p>Error: ${data.error}</p>`;
-    } else if (data.length === 0) {
-      html = "<p>No stocks available for this amount</p>";
-    } else {
-      data.forEach(stock => {
-        html += `
-          <p>${stock.symbol} - ₹${stock.price}
-          <button onclick="buyStock('${stock.symbol}', ${stock.price})">Buy</button></p>`;
-      });
-    }
-    document.getElementById("suggestions").innerHTML = html;
-  });
+    .then(res => res.json())
+    .then(data => {
+      data.forEach(s => s.qty = Math.floor(amount / s.price));
+      data.sort((a, b) => b.qty - a.qty);
+
+      document.getElementById("top-picks").innerHTML =
+        data.slice(0, 2).map(stockCard).join("");
+
+      document.getElementById("suggestions").innerHTML =
+        data.slice(2).map(stockCard).join("");
+    });
 }
 
-// ---------------- BUY STOCK ----------------
+function stockCard(s) {
+  return `
+    <div class="card">
+      <p><b>${s.symbol}</b></p>
+      <p>Price: ₹${s.price}</p>
+      <p>Qty: ${s.qty}</p>
+      <button onclick="buyStock('${s.symbol}', ${s.price})">Buy</button>
+    </div>
+  `;
+}
+
 function buyStock(symbol, price) {
   fetch("http://127.0.0.1:5000/buy-stock", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       user_id: localStorage.getItem("user_id"),
-      symbol: symbol,
-      price: price,
+      symbol,
+      price,
       quantity: 1
     })
   })
-  .then(res => res.json())
-  .then(data => alert(data.message));
+    .then(res => res.json())
+    .then(d => alert(d.message));
 }
 
-// ---------------- PORTFOLIO DISPLAY ----------------
-function loadPortfolio(divId) {
-  const user_id = localStorage.getItem("user_id");
-  fetch(`http://127.0.0.1:5000/portfolio/${user_id}`)
+// ---------------- SELL PAGE (FIXED) ----------------
+function loadSellSuggestions() {
+  const user = localStorage.getItem("user_id");
+
+  fetch(`http://127.0.0.1:5000/portfolio/${user}`)
     .then(res => res.json())
     .then(data => {
-      let html = "";
-      if (data.length === 0) html = "<p>No stocks in your portfolio</p>";
-      data.forEach(stock => {
-        html += `<p>${stock.symbol} | Qty: ${stock.quantity} | ₹${stock.price}
-          <button onclick="sellStock('${stock.symbol}')">Sell</button></p>`;
+      if (!data.stocks || data.stocks.length === 0) {
+        document.getElementById("top-picks").innerHTML =
+          "<p>No stocks to sell</p>";
+        document.getElementById("portfolio").innerHTML = "";
+        return;
+      }
+
+      // Compute profit per stock
+      data.stocks.forEach(s => {
+        s.profit = s.current_value - s.invested;
       });
-      document.getElementById(divId).innerHTML = html;
+
+      // Sort by profit DESC
+      const sorted = [...data.stocks].sort(
+        (a, b) => b.profit - a.profit
+      );
+
+      document.getElementById("top-picks").innerHTML =
+        sorted.slice(0, 2).map(sellCard).join("");
+
+      document.getElementById("portfolio").innerHTML =
+        sorted.slice(2).map(sellCard).join("");
     });
 }
 
-// ---------------- SELL STOCK ----------------
-function sellStock(symbol) {
+function sellCard(s) {
+  return `
+    <div class="card">
+      <p><b>${s.symbol}</b></p>
+      <p>Qty Owned: ${s.quantity}</p>
+      <p>Buy Price: ₹${s.buy_price}</p>
+      <p>Current Price: ₹${(s.current_value / s.quantity).toFixed(2)}</p>
+      <p>Profit: ₹${s.profit.toFixed(2)}</p>
+
+      <input
+        type="number"
+        min="1"
+        max="${s.quantity}"
+        value="1"
+        id="sell-${s.symbol}"
+      />
+
+      <button onclick="sellStock(
+        '${s.symbol}',
+        document.getElementById('sell-${s.symbol}').value
+      )">
+        Sell
+      </button>
+    </div>
+  `;
+}
+
+function sellStock(symbol, quantity) {
   fetch("http://127.0.0.1:5000/sell-stock", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       user_id: localStorage.getItem("user_id"),
-      symbol: symbol
+      symbol,
+      quantity: parseInt(quantity)
     })
   })
-  .then(res => res.json())
-  .then(data => alert(data.message))
-  .then(() => window.location.reload());
+    .then(res => res.json())
+    .then(d => {
+      alert(d.message);
+      loadSellSuggestions();
+    });
 }
 
-// ---------------- PAGE LOAD ----------------
-window.onload = function() {
-  const path = window.location.pathname;
-  if (path.includes("home.html")) {
-    document.getElementById("user").innerText = localStorage.getItem("user_id");
-  }
-  if (path.includes("sell.html")) loadPortfolio("portfolio");
-  if (path.includes("profile.html")) loadPortfolio("portfolio");
+// ---------------- PORTFOLIO (READ ONLY) ----------------
+function loadPortfolioReadOnly() {
+  const user = localStorage.getItem("user_id");
+
+  fetch(`http://127.0.0.1:5000/portfolio/${user}`)
+    .then(res => res.json())
+    .then(renderPortfolio);
+}
+
+function renderPortfolio(data) {
+  let invested = 0;
+  let current = 0;
+
+  data.stocks.forEach(s => {
+    invested += s.invested;
+    current += s.current_value;
+  });
+
+  const profit = current - invested;
+
+  document.getElementById("total-invested").innerText = invested.toFixed(2);
+  document.getElementById("current-value").innerText = current.toFixed(2);
+  document.getElementById("profit-loss").innerText = profit.toFixed(2);
+  document.getElementById("direction").innerText = profit >= 0 ? "↑" : "↓";
+
+  document.getElementById("portfolio").innerHTML =
+    data.stocks.map(s => `
+      <div class="card">
+        <p><b>${s.symbol}</b></p>
+        <p>Qty: ${s.quantity}</p>
+        <p>Invested: ₹${s.invested.toFixed(2)}</p>
+        <p>Current: ₹${s.current_value.toFixed(2)}</p>
+        <p>Profit: ₹${(s.current_value - s.invested).toFixed(2)}</p>
+      </div>
+    `).join("");
+}
+
+// ---------------- PAGE LOAD (SINGLE & FIXED) ----------------
+window.onload = () => {
+  const p = window.location.pathname;
+
+  if (p.includes("sell.html")) loadSellSuggestions();
+  if (p.includes("profile.html")) loadPortfolioReadOnly();
 };

@@ -6,10 +6,15 @@
 </head>
 <body>
   <h2>💰 Buy Stocks</h2>
-  <input id="amount" placeholder="Enter investment amount">
+  <input id="amount" placeholder="Enter amount">
   <button onclick="getBuySuggestions()">Get Suggestions</button>
 
-  <div id="suggestions"></div>
+  <h3>🏆 Top 2 Picks</h3>
+  <div id="top-picks" class="cards-container"></div>
+
+  <h3>Other Suggestions</h3>
+  <div id="suggestions" class="cards-container"></div>
+
   <br>
   <button onclick="navigate('home')">⬅ Back to Home</button>
 
