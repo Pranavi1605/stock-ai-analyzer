@@ -2,57 +2,98 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, firestore
+from datetime import datetime
 import os
+import random
 
+# ------------------ FLASK ------------------
 app = Flask(__name__, static_folder="../frontend", static_url_path="")
 CORS(app)
 
-# ---------- FIREBASE ----------
+# ------------------ FIREBASE ------------------
 cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# ---------- UTIL ----------
+# ------------------ UTIL ------------------
 def normalize_symbol(sym):
     if not sym:
         return None
     return sym.replace(".NS", "").strip().upper()
 
-# ---------- BUY STOCK ----------
+def get_current_price(symbol, fallback):
+    """
+    Fetch price from Firestore and simulate market movement
+    """
+    price_doc = db.collection("stock_prices").document(symbol).get()
+    if not price_doc.exists:
+        price_doc = db.collection("stock_prices").document(symbol + ".NS").get()
+
+    if not price_doc.exists:
+        return fallback
+
+    base_price = round(price_doc.to_dict().get("price", fallback), 2)
+    change = random.uniform(-0.03, 0.03)  # ±3% movement
+    return round(base_price * (1 + change), 2)
+
+# ------------------ BUY STOCK ------------------
 @app.route("/buy-stock", methods=["POST"])
 def buy_stock():
     d = request.json
-    user = d["user_id"]
-    symbol = normalize_symbol(d["symbol"])
+
+    user = d.get("user_id")
+    symbol = normalize_symbol(d.get("symbol"))
     qty = int(d.get("quantity", 1))
-    buy_price = float(d["price"])
+    buy_price = round(float(d.get("price", 0)), 2)
+
+    if not user or not symbol or buy_price <= 0 or qty <= 0:
+        return jsonify({"message": "Invalid data"}), 400
 
     ref = db.collection("users").document(user)\
         .collection("portfolio").document(symbol)
 
+    now = datetime.utcnow()
     doc = ref.get()
+
     if doc.exists:
         old = doc.to_dict()
-        ref.update({
-            "quantity": old["quantity"] + qty,
-            "buy_price": buy_price
-        })
+        old_qty = old.get("quantity", 0)
+        old_price = old.get("buy_price", buy_price)
+
+        new_qty = old_qty + qty
+        avg_price = round(
+            ((old_qty * old_price) + (qty * buy_price)) / new_qty, 2
+        )
+
+        ref.set({
+            "symbol": symbol,
+            "quantity": new_qty,
+            "buy_price": avg_price,
+            "updated_at": now
+        }, merge=True)
+
     else:
         ref.set({
             "symbol": symbol,
+            "quantity": qty,
             "buy_price": buy_price,
-            "quantity": qty
+            "created_at": now,
+            "updated_at": now
         })
 
     return jsonify({"message": "Stock bought successfully"})
 
-# ---------- SELL STOCK ----------
+# ------------------ SELL STOCK ------------------
 @app.route("/sell-stock", methods=["POST"])
 def sell_stock():
     d = request.json
-    user = d["user_id"]
-    symbol = normalize_symbol(d["symbol"])
-    sell_qty = int(d["quantity"])
+
+    user = d.get("user_id")
+    symbol = normalize_symbol(d.get("symbol"))
+    sell_qty = int(d.get("quantity", 0))
+
+    if not user or not symbol or sell_qty <= 0:
+        return jsonify({"message": "Invalid data"}), 400
 
     ref = db.collection("users").document(user)\
         .collection("portfolio").document(symbol)
@@ -61,15 +102,20 @@ def sell_stock():
     if not doc.exists:
         return jsonify({"message": "Stock not found"}), 404
 
-    qty = doc.to_dict()["quantity"]
+    data = doc.to_dict()
+    qty = data.get("quantity", 0)
+
     if sell_qty >= qty:
         ref.delete()
     else:
-        ref.update({"quantity": qty - sell_qty})
+        ref.update({
+            "quantity": qty - sell_qty,
+            "updated_at": datetime.utcnow()
+        })
 
     return jsonify({"message": "Sell successful"})
 
-# ---------- BUY SUGGESTIONS ----------
+# ------------------ BUY SUGGESTIONS ------------------
 @app.route("/buy-suggestions", methods=["POST"])
 def buy_suggestions():
     data = request.json
@@ -78,13 +124,12 @@ def buy_suggestions():
 
     for doc in db.collection("stock_prices").stream():
         stock = doc.to_dict()
-        price = stock.get("price")
+        price = round(stock.get("price", 0), 2)
         symbol = normalize_symbol(doc.id)
 
-        if not price or price <= 0 or price > amount:
+        if price <= 0 or price > amount:
             continue
 
-        # keep cheapest price per symbol
         if symbol not in clean or price < clean[symbol]["price"]:
             clean[symbol] = {
                 "symbol": symbol,
@@ -97,39 +142,42 @@ def buy_suggestions():
 
     return jsonify(results[:20])
 
-# ---------- SELL SUGGESTIONS ----------
+# ------------------ SELL SUGGESTIONS ------------------
 @app.route("/sell-suggestions/<user>", methods=["GET"])
 def sell_suggestions(user):
     suggestions = []
 
     portfolio_ref = db.collection("users").document(user).collection("portfolio")
+
     for doc in portfolio_ref.stream():
         stock = doc.to_dict()
         symbol = normalize_symbol(doc.id)
-        qty = stock["quantity"]
-        buy_price = stock["buy_price"]
 
-        # try both SYMBOL and SYMBOL.NS
-        price_doc = db.collection("stock_prices").document(symbol).get()
-        if not price_doc.exists:
-            price_doc = db.collection("stock_prices").document(symbol + ".NS").get()
+        qty = stock.get("quantity", 0)
+        buy_price = round(stock.get("buy_price", 0), 2)
 
-        curr_price = price_doc.to_dict()["price"] if price_doc.exists else buy_price
-        profit = (curr_price - buy_price) * qty
+        if qty <= 0 or buy_price <= 0:
+            continue
+
+        curr_price = get_current_price(symbol, buy_price)
+
+        profit = round((curr_price - buy_price) * qty, 2)
+        profit_percent = round(((curr_price - buy_price) / buy_price) * 100, 2)
 
         suggestions.append({
             "symbol": symbol,
             "quantity": qty,
+            "buy_price": buy_price,
             "current_price": curr_price,
             "profit": profit,
+            "profit_percent": profit_percent,
             "suggested_sell_qty": qty
         })
 
     suggestions.sort(key=lambda x: x["profit"], reverse=True)
-
     return jsonify(suggestions)
 
-# ---------- PORTFOLIO ----------
+# ------------------ PORTFOLIO ------------------
 @app.route("/portfolio/<user>")
 def portfolio(user):
     total_invested = 0
@@ -139,17 +187,17 @@ def portfolio(user):
     for doc in db.collection("users").document(user).collection("portfolio").stream():
         s = doc.to_dict()
         symbol = normalize_symbol(doc.id)
-        qty = s["quantity"]
-        buy_price = s["buy_price"]
 
-        price_doc = db.collection("stock_prices").document(symbol).get()
-        if not price_doc.exists:
-            price_doc = db.collection("stock_prices").document(symbol + ".NS").get()
+        qty = s.get("quantity", 0)
+        buy_price = round(s.get("buy_price", 0), 2)
 
-        curr_price = price_doc.to_dict()["price"] if price_doc.exists else buy_price
+        if qty <= 0 or buy_price <= 0:
+            continue
 
-        invested = buy_price * qty
-        current = curr_price * qty
+        curr_price = get_current_price(symbol, buy_price)
+
+        invested = round(buy_price * qty, 2)
+        current = round(curr_price * qty, 2)
 
         total_invested += invested
         current_value += current
@@ -161,26 +209,28 @@ def portfolio(user):
             "current_price": curr_price,
             "invested": invested,
             "current_value": current,
-            "profit": current - invested
+            "profit": round(current - invested, 2),
+            "profit_percent": round(((current - invested) / invested) * 100, 2)
         })
 
-    profit = current_value - total_invested
+    profit = round(current_value - total_invested, 2)
 
     return jsonify({
-        "total_invested": total_invested,
-        "current_value": current_value,
+        "total_invested": round(total_invested, 2),
+        "current_value": round(current_value, 2),
         "profit": profit,
         "direction": "UP" if profit >= 0 else "DOWN",
         "stocks": stocks
     })
 
-# ---------- FRONTEND ----------
+# ------------------ FRONTEND ------------------
 @app.route("/", defaults={"path": "index.html"})
 @app.route("/<path:path>")
 def serve_frontend(path):
     frontend_folder = os.path.join(os.path.dirname(__file__), "../frontend")
     return send_from_directory(frontend_folder, path)
 
-# ---------- RUN ----------
+# ------------------ RUN ------------------
 if __name__ == "__main__":
     app.run(debug=True)
+
